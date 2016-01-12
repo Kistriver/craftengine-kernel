@@ -18,8 +18,8 @@ class RequestHandler(object):
     connection = None
     serializer = None
 
-    STREAMIN = 0
-    STREAMOUT = 1
+    STREAMIN = select.EPOLLIN
+    STREAMOUT = select.EPOLLOUT
     streamst = STREAMIN
 
     fileno = None
@@ -114,16 +114,8 @@ class RequestHandler(object):
     def stream(self, sttype):
         st = self.streamst
         self.streamst = sttype
-        if sttype == self.STREAMIN:
-            logging.debug("IN")
-            ep = select.EPOLLIN
-        elif sttype == self.STREAMOUT:
-            ep = select.EPOLLOUT
-            logging.debug("OUT")
-        else:
-            raise TypeError("Unexpected stream type")
         try:
-            self.rpc.epoll.modify(self.fileno, ep)
+            self.rpc.epoll.modify(self.fileno, sttype)
         except OSError:
             self.close()
         return st
