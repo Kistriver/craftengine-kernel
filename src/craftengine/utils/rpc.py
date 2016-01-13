@@ -60,9 +60,7 @@ class RequestHandler(object):
         try:
             data = self.serializer.decode(self.connection)
             if len(data) == 4:
-                # TODO: Fix it! Do it like a normal programmer
-                api.Api().execute.__globals__["request"] = self
-                response = api.Api().execute(data)
+                response = api.Api().execute(data, request=self)
                 if response is None:
                     return
                 else:
