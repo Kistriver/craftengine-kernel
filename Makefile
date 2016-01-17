@@ -8,7 +8,7 @@ build:
 	cp Dockerfile Dockerfile.tmp
 	sed -i "s|##CE_VER##|$(CE_VER)|" Dockerfile.tmp
 	docker build -t kistriver/ce-kernel:$(CE_VER) -f Dockerfile.tmp .
-	docker tag kistriver/ce-kernel:$(CE_VER) kistriver/ce-kernel
+	docker tag -f kistriver/ce-kernel:$(CE_VER) kistriver/ce-kernel
 	rm -f Dockerfile.tmp VERSION.tmp
 
 run: build

@@ -8,6 +8,7 @@ import time
 from craftengine.utils.exceptions import ModuleException
 import craftengine
 from craftengine.utils import registry
+from craftengine.utils import event
 
 
 class ApiException(ModuleException):
@@ -148,7 +149,8 @@ class Api(object):
         except:
             logging.exception("Could not process response")
 
-def auth(request, p, plugin, token):
+
+def kernel_auth(request, p, plugin, token):
     pl = None
     pls = registry.GlobalRegistry().get("kernel.plugins")
     for pli in pls.values():
@@ -164,7 +166,17 @@ def auth(request, p, plugin, token):
     else:
         return False
 
-Api.bind("kernel.auth", auth)
+
+def event_register(request, plugin, *args, **kwargs):
+    if len(args) > 1:
+        args = (args[0],) + ((args[1], request, plugin),) + tuple(*args[2:])
+
+    if "callback" in kwargs.keys():
+        kwargs["callback"] = kwargs["callback"], request, plugin
+
+    return event.Event().register(*args, **kwargs)
+
+Api.bind("kernel.auth", kernel_auth)
 Api.bind(
     "kernel.env",
     Api.proxy_property(craftengine.Kernel().env),
@@ -195,3 +207,11 @@ for ns in [
             Api.proxy_method(registry.Registry().__getattribute__(m)),
             "registry.%s.%s"
         )
+
+Api.bind(
+    "event.register",
+    event_register,
+    "event.register"
+)
+Api.bind("event.initiate", Api.proxy_method(event.Event().initiate), "event.initiate")
+Api.bind("event.info", Api.proxy_method(event.Event().info), "event.info")
