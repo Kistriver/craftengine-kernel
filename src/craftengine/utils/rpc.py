@@ -5,6 +5,7 @@ import socket
 import select
 import logging
 import errno
+import threading
 
 from craftengine.utils.registry import Registry
 from craftengine import api
@@ -116,6 +117,8 @@ class RequestHandler(object):
             self.rpc.epoll.modify(self.fileno, sttype)
         except OSError:
             self.close()
+        except ValueError:
+            logging.exception("")
         return st
 
 
@@ -180,10 +183,12 @@ class Server(object):
                 events = self.epoll.poll(1)
                 for fileno, event in events:
                     if fileno == self.s.fileno():
-                        clentinst = self.handler(self)
-                        Registry().hset("api.pool", clentinst.fileno, clentinst)
+                        self.newcli()
                     else:
-                        fni = Registry().hget("api.pool", fileno)
+                        try:
+                            fni = Registry().hget("api.pool", fileno)
+                        except KeyError:
+                            continue
                         if event & select.EPOLLIN:
                             fni.epollin()
                         elif event & select.EPOLLOUT:
@@ -195,6 +200,13 @@ class Server(object):
             if self.alive:
                 logging.exception("Exception has thrown: restarting server")
                 self.serve_forever()
+
+    def newcli(self):
+        def _create(srv):
+            clentinst = srv.handler(srv)
+            Registry().hset("api.pool", clentinst.fileno, clentinst)
+
+        threading.Thread(target=_create, args=(self,), name="CE-RPC").start()
 
 
 def run_server(host=None, port=None):

@@ -17,7 +17,10 @@ from craftengine.utils.registry import (
 )
 
 # TODO: Remove it
-logging.basicConfig(format="\033[0m[%(levelname)s] %(message)s\033[0m", level="DEBUG")
+logging.basicConfig(
+    format="\033[0m[%(levelname)s][%(threadName)s][%(asctime)-15s] %(message)s\033[0m",
+    level="INFO",
+)
 
 
 class Kernel(KernelModuleSingleton):
@@ -47,6 +50,22 @@ class Kernel(KernelModuleSingleton):
 
         Registry().set("kernel.docker", Docker(base_url="unix://var/run/docker.sock"))
 
+    def exit(self, *args, **kwargs):
+        super().exit(*args, **kwargs)
+        logging.info("Stopping kernel...")
+        server = Registry().get("server")
+        server.shutdown()
+
+        pls = GlobalRegistry().get("kernel.plugins")
+        docker = Registry().get("kernel.docker")
+        for pl in pls.values():
+            try:
+                docker.remove_container(container=pl["name"], force=True)
+                logging.info("'%s' service stopped" % pl["name"])
+            except:
+                pass
+
+    def serve(self):
         pls = GlobalRegistry().get("kernel.plugins")
         docker = Registry().get("kernel.docker")
         for pl in pls.values():
@@ -67,24 +86,12 @@ class Kernel(KernelModuleSingleton):
                 },
             )
             docker.start(container=pl["name"])
+            logging.info("'%s' service started" % pl["name"])
+            import time
+            time.sleep(1)
 
-    def exit(self, *args, **kwargs):
-        super().exit(*args, **kwargs)
-        server = Registry().get("server")
-        server.shutdown()
-
-        pls = GlobalRegistry().get("kernel.plugins")
-        docker = Registry().get("kernel.docker")
-        for pl in pls.values():
-            try:
-                docker.remove_container(container=pl["name"], force=True)
-            except:
-                pass
-
-    def serve(self):
         from craftengine.utils.rpc import run_server
         run_server("0.0.0.0", 5000)
-        self.exit()
 
     @property
     def env(self):
