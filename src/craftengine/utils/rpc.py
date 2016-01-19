@@ -9,7 +9,7 @@ import threading
 
 from craftengine.utils.registry import Registry
 from craftengine import api
-from craftengine.utils.ddp import DdpSocket
+from ddp import DdpSocket
 
 
 class RequestHandler(object):

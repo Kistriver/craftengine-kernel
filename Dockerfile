@@ -11,11 +11,9 @@ apt-get update && \
 apt-get upgrade -y && \
 apt-get install -y python3 python3-dev python3-pip #liblua5.2-dev
 
-COPY requirements.txt /home/craftengine/requirements.txt
 WORKDIR /home/craftengine
+COPY libs.tmp /usr/lib/ce-deps
+COPY build.tmp /home/craftengine
 RUN pip3 install -r requirements.txt
 
-COPY src /home/craftengine
-COPY VERSION.tmp /home/craftengine/VERSION
-COPY LICENSE /home/craftengine/LICENSE
-CMD python3 __main__.py
+CMD PYTHONPATH="/usr/lib/ce-deps/":"${PYTHONPATH}" python3 -u __main__.py
