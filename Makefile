@@ -3,6 +3,7 @@
 CE_VER := $(shell git describe --always --tag)
 
 build:
+	-rm -rf build.tmp
 	cp -R src build.tmp
 	cp LICENSE build.tmp/LICENSE
 	cp requirements.txt build.tmp/requirements.txt
@@ -17,7 +18,8 @@ docker: build
 	docker tag -f kistriver/ce-kernel:$(CE_VER) kistriver/ce-kernel
 
 run: docker
-	docker run --name ce-kernel -ti --rm -e REDIS_PORT=6379 --link ce-redis:redis -v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
+	docker run --name ce-kernel -ti --rm -e REDIS_PORT=6379 -e CE_PROJECT_NAME="CRAFTEngine" -e CE_NODE_NAME="alpha" \
+	--link ce-redis:redis -v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
 
 clean:
 	-rm -rf */__pycache__

@@ -99,7 +99,7 @@ class Registry(RegistryMixIn, KernelModuleSingleton):
 
 class PermanentRegistry(RegistryMixIn, KernelModuleSingleton):
     def init(self, *args, **kwargs):
-        self._registry = redis_dict("REGISTRY:NODE:%s" % self.kernel.env.node)
+        self._registry = redis_dict("REGISTRY:NODE:%s" % self.kernel.env["CE_NODE_NAME"])
 
 
 class GlobalRegistry(RegistryMixIn, KernelModuleSingleton):
