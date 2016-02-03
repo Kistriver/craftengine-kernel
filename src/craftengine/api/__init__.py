@@ -4,6 +4,7 @@ __author__ = "Alexey Kachalov"
 import logging
 import traceback
 import time
+import multiprocessing
 
 from craftengine.utils.exceptions import ModuleException
 import craftengine
@@ -162,6 +163,8 @@ def kernel_auth(request, p, plugin, token):
 
     if pl["token"] == token:
         registry.Registry().hset("api.plugins", pl["name"], request.fileno)
+        # TODO: Fix threading first
+        # threading.current_thread().setName(pl["name"])
         return True
     else:
         return False
@@ -177,6 +180,12 @@ def event_register(request, plugin, *args, **kwargs):
     return event.Event().register(*args, **kwargs)
 
 Api.bind("kernel.auth", kernel_auth)
+Api.bind("kernel.logger.log", Api.proxy_method(logging.log))
+Api.bind("kernel.logger.debug", Api.proxy_method(logging.debug))
+Api.bind("kernel.logger.info", Api.proxy_method(logging.info))
+Api.bind("kernel.logger.warning", Api.proxy_method(logging.warning))
+Api.bind("kernel.logger.error", Api.proxy_method(logging.error))
+Api.bind("kernel.logger.critical", Api.proxy_method(logging.critical))
 Api.bind(
     "kernel.env",
     Api.proxy_property(craftengine.Kernel().env),

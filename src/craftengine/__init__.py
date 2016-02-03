@@ -3,6 +3,7 @@ __author__ = "Alexey Kachalov"
 
 import logging
 import signal
+import threading
 from docker import Client as Docker
 
 from craftengine.middleware.redis import Redis
@@ -27,6 +28,7 @@ class Kernel(KernelModuleSingleton):
     _env = None
 
     def init(self, *args, **kwargs):
+        threading.current_thread().setName("kernel")
         self._env = {}
         for k, v in kwargs.items():
             try:
@@ -91,7 +93,7 @@ class Kernel(KernelModuleSingleton):
             time.sleep(1)
 
         from craftengine.utils.rpc import run_server
-        run_server("0.0.0.0", 5000)
+        run_server("0.0.0.0", 2011)
 
     @property
     def env(self):

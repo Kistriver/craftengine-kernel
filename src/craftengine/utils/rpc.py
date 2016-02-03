@@ -206,7 +206,8 @@ class Server(object):
             clentinst = srv.handler(srv)
             Registry().hset("api.pool", clentinst.fileno, clentinst)
 
-        threading.Thread(target=_create, args=(self,), name="CE-RPC").start()
+        # TODO: In any way it works in main thread :c
+        threading.Thread(target=_create, args=(self,), name="kernel.rpc").start()
 
 
 def run_server(host=None, port=None):

@@ -10,7 +10,7 @@ build:
 	echo $(CE_VER) > build.tmp/VERSION
 
 docker: build
-	if ! [ -e libs.tmp/ddp ]; then git clone git@bitbucket.org:Kistriver/darkdist-protocol.git libs.tmp/ddp; fi
+	if ! [ -e libs.tmp/ddp ]; then git clone git@git.kistriver.com:kistriver/ddp.git libs.tmp/ddp; fi
 	if ! [ -e libs.tmp/pycraftengine ]; then git clone git@git.kistriver.com:kistriver/craftengine-python.git libs.tmp/pycraftengine; fi
 	cp Dockerfile Dockerfile.tmp
 	sed -i "s|##CE_VER##|$(CE_VER)|" Dockerfile.tmp
@@ -19,7 +19,7 @@ docker: build
 
 run: docker
 	docker run --name ce-kernel -ti --rm -e REDIS_PORT=6379 -e CE_PROJECT_NAME="CRAFTEngine" -e CE_NODE_NAME="alpha" \
-	--link ce-redis:redis -v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
+	--link ce-redis:redis -p 2011:2011 -v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
 
 clean:
 	-rm -rf */__pycache__
