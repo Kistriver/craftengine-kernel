@@ -6,6 +6,7 @@ import select
 import logging
 import errno
 import threading
+from multiprocessing.dummy import Pool as ThreadPool
 
 from craftengine.utils.registry import Registry
 from craftengine import api
@@ -26,6 +27,7 @@ class RequestHandler(object):
     fileno = None
 
     def __init__(self, rpc):
+        self.alive = None
         self.rpc = rpc
         self.erpcid = 0
         self.host = None
@@ -44,6 +46,7 @@ class RequestHandler(object):
             return
 
         self.fileno = self.connection.fileno()
+        self.alive = True
         logging.info("Client connected(%s:%d)" % (self.host, self.port))
         logging.debug("Client fileno: %i" % self.fileno)
         self.connection.setblocking(False)
@@ -58,22 +61,40 @@ class RequestHandler(object):
         return
 
     def epollin(self):
+        def cb(r):
+            if r is None:
+                return
+            self.response.append(r)
+            self.stream(self.STREAMOUT)
+
         try:
             data = self.serializer.decode(self.connection)
+        except IndexError:
+            self.close()
+            return
+
+        try:
             if len(data) == 4:
-                response = api.Api().execute(data, request=self)
-                if response is None:
-                    return
-                else:
-                    self.response.append(response)
+                self.rpc.workers.apply_async(
+                    api.Api().execute,
+                    (data,),
+                    {"request": self},
+                    callback=cb,
+                )
+                #response = api.Api().execute(data, request=self)
+                #if response is None:
+                #    return
+                #else:
+                #    self.response.append(response)
             else:
                 # We've got response on our request
                 api.Api.response(data)
+                self.stream(self.STREAMOUT)
                 return
         except:
             logging.exception("")
             self.close()
-        self.stream(self.STREAMOUT)
+        #self.stream(self.STREAMOUT)
 
     def epollout(self):
         try:
@@ -93,6 +114,10 @@ class RequestHandler(object):
         self.close()
 
     def close(self):
+        if not self.alive:
+            return
+        self.alive = False
+
         try:
             logging.info("Client disconnected(%s:%d)" % (self.host, self.port))
         except TypeError:
@@ -122,27 +147,38 @@ class RequestHandler(object):
         return st
 
 
-class Server(object):
-    alive = True
+class RpcServer(object):
+    alive = None
+    workers = None
+
     epoll = None
     s = None
 
     host = None
     port = None
 
-    handler = None
+    handler = RequestHandler
 
-    def __init__(self, params, request_handler):
+    def __init__(self, params):
         Registry().hash("api.pool")
         Registry().hash("api.requests")
         self. host, self.port = params
-        self.handler = request_handler
+        logging.info('Starting server(%s:%i)' % (self. host, self.port))
+
+    def make_workers(self):
+        self.workers = ThreadPool(8)
 
     def serve_forever(self):
         try:
             self.socketserver()
         except:
             logging.exception("Could not start socket server")
+            return
+
+        try:
+            self.make_workers()
+        except:
+            logging.exception("Could not start workers")
             return
 
         try:
@@ -153,6 +189,7 @@ class Server(object):
                 return
 
     def shutdown(self):
+        logging.info("Stopping RPC server...")
         self.alive = False
         try:
             self.epoll.unregister(self.s.fileno())
@@ -178,12 +215,14 @@ class Server(object):
         self.epoll = select.epoll()
         self.epoll.register(self.s.fileno(), select.EPOLLIN)
 
+        self.alive = True
         try:
             while self.alive:
                 events = self.epoll.poll(1)
                 for fileno, event in events:
                     if fileno == self.s.fileno():
-                        self.newcli()
+                        clentinst = self.handler(self)
+                        Registry().hset("api.pool", clentinst.fileno, clentinst)
                     else:
                         try:
                             fni = Registry().hget("api.pool", fileno)
@@ -200,22 +239,3 @@ class Server(object):
             if self.alive:
                 logging.exception("Exception has thrown: restarting server")
                 self.serve_forever()
-
-    def newcli(self):
-        def _create(srv):
-            clentinst = srv.handler(srv)
-            Registry().hset("api.pool", clentinst.fileno, clentinst)
-
-        # TODO: In any way it works in main thread :c
-        threading.Thread(target=_create, args=(self,), name="kernel.rpc").start()
-
-
-def run_server(host=None, port=None):
-    server = Server((host, port), RequestHandler)
-    Registry().set("server", server)
-    logging.info('Starting server...')
-    try:
-        logging.info("Started")
-        server.serve_forever()
-    except Exception as exc:
-        logging.exception(exc)

@@ -1,4 +1,4 @@
-FROM debian:8
+FROM python:3
 MAINTAINER Alexey Kachalov <kachalov@kistriver.com>
 
 LABEL \
@@ -9,7 +9,7 @@ Description="This image is used to start CRAFTEngine core"
 RUN \
 apt-get update && \
 apt-get upgrade -y && \
-apt-get install -y python3 python3-dev python3-pip #liblua5.2-dev
+apt-get install -y liblua5.2-dev
 
 WORKDIR /home/craftengine
 COPY libs.tmp /usr/lib/ce-deps

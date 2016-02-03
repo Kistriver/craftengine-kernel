@@ -4,6 +4,7 @@ __author__ = "Alexey Kachalov"
 import logging
 import signal
 import threading
+import time
 from docker import Client as Docker
 
 from craftengine.middleware.redis import Redis
@@ -16,18 +17,15 @@ from craftengine.utils.registry import (
     PermanentRegistry,
     GlobalRegistry,
 )
-
-# TODO: Remove it
-logging.basicConfig(
-    format="\033[0m[%(levelname)s][%(threadName)s][%(asctime)-15s] %(message)s\033[0m",
-    level="INFO",
-)
+from craftengine.utils.exceptions import KernelException
 
 
 class Kernel(KernelModuleSingleton):
+    alive = None
     _env = None
 
     def init(self, *args, **kwargs):
+        self.alive = True
         threading.current_thread().setName("kernel")
         self._env = {}
         for k, v in kwargs.items():
@@ -53,21 +51,43 @@ class Kernel(KernelModuleSingleton):
         Registry().set("kernel.docker", Docker(base_url="unix://var/run/docker.sock"))
 
     def exit(self, *args, **kwargs):
-        super().exit(*args, **kwargs)
-        logging.info("Stopping kernel...")
-        server = Registry().get("server")
-        server.shutdown()
+        if not self.alive:
+            return
+        self.alive = False
 
-        pls = GlobalRegistry().get("kernel.plugins")
-        docker = Registry().get("kernel.docker")
-        for pl in pls.values():
-            try:
-                docker.remove_container(container=pl["name"], force=True)
-                logging.info("'%s' service stopped" % pl["name"])
-            except:
-                pass
+        try:
+            logging.info("Stopping kernel...")
+            super().exit(*args, **kwargs)
+
+            pls = GlobalRegistry().get("kernel.plugins")
+            docker = Registry().get("kernel.docker")
+            for pl in pls.values():
+                try:
+                    docker.remove_container(container=pl["name"], force=True)
+                    logging.info("'%s' service stopped" % pl["name"])
+                except:
+                    pass
+
+            server = Registry().get("server")
+            server.shutdown()
+        except:
+            logging.exception("")
+            self.alive = True
 
     def serve(self):
+        from craftengine.utils.rpc import RpcServer
+        server = RpcServer((
+            self.env.get("rpc.host", "0.0.0.0"),
+            int(self.env.get("rpc.port", 2011))
+        ))
+        Registry().set("server", server)
+        threading.Thread(target=server.serve_forever, name="kernel.rpc").start()
+        while self.alive and server.alive is None:
+            time.sleep(0.1)
+
+        if not server.alive:
+            raise KernelException("RPC Server start failed")
+
         pls = GlobalRegistry().get("kernel.plugins")
         docker = Registry().get("kernel.docker")
         for pl in pls.values():
@@ -89,11 +109,9 @@ class Kernel(KernelModuleSingleton):
             )
             docker.start(container=pl["name"])
             logging.info("'%s' service started" % pl["name"])
-            import time
-            time.sleep(1)
 
-        from craftengine.utils.rpc import run_server
-        run_server("0.0.0.0", 2011)
+        while self.alive and server.alive:
+            time.sleep(1)
 
     @property
     def env(self):

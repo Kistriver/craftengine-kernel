@@ -3,6 +3,7 @@ __author__ = "Alexey Kachalov"
 
 import logging
 import json
+import threading
 
 from craftengine import KernelModule, KernelModuleSingleton
 
@@ -32,9 +33,11 @@ def redis_dict(prefix):
 
 class RegistryMixIn(KernelModule):
     _registry = None
+    _lock = None
 
     def init(self, *args, **kwargs):
         self._registry = {}
+        self._lock = threading.RLock()
 
     def get(self, key):
         logging.debug("Get value(%s)" % key)
@@ -65,15 +68,15 @@ class RegistryMixIn(KernelModule):
 
     def lpush(self, key, data):
         logging.debug("Push value(%s)" % key)
-        # TODO: Atomic operation
-        self._registry[key][1:-1] = self._registry[key]
-        self._registry[key][0] = data
+        with self._lock:
+            self._registry[key][1:-1] = self._registry[key]
+            self._registry[key][0] = data
 
     def lpop(self, key):
         logging.debug("Pop value(%s)" % key)
-        # TODO: Atomic operation
-        r = self._registry[key][0]
-        del self._registry[key][0]
+        with self._lock:
+            r = self._registry[key][0]
+            del self._registry[key][0]
         return r
 
     def hash(self, key, namespace=None, has_permission=None):

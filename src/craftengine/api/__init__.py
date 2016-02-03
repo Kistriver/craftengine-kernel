@@ -4,7 +4,7 @@ __author__ = "Alexey Kachalov"
 import logging
 import traceback
 import time
-import multiprocessing
+import threading
 
 from craftengine.utils.exceptions import ModuleException
 import craftengine
@@ -96,7 +96,9 @@ class Api(object):
                 for pli in pls.values():
                     if pli["name"] == plugin:
                         pl = pli
+                threading.current_thread().setName(pl["name"])
                 Api.has_permission(pl["permissions"], perms_reqs)
+
             data = function(request, plugin, *args, **kwargs)
         except Exception as e:
             error = ["%s.%s" % (getattr(e, "__module__", "__built_in__"), e.__class__.__name__), str(e), traceback.extract_tb(e.__traceback__)]
@@ -163,8 +165,6 @@ def kernel_auth(request, p, plugin, token):
 
     if pl["token"] == token:
         registry.Registry().hset("api.plugins", pl["name"], request.fileno)
-        # TODO: Fix threading first
-        # threading.current_thread().setName(pl["name"])
         return True
     else:
         return False
