@@ -5,7 +5,6 @@ import socket
 import select
 import logging
 import errno
-import threading
 from multiprocessing.dummy import Pool as ThreadPool
 
 from craftengine.utils.registry import Registry
@@ -74,18 +73,13 @@ class RequestHandler(object):
             return
 
         try:
-            if len(data) == 4:
+            if len(data) == 5:
                 self.rpc.workers.apply_async(
                     api.Api().execute,
-                    (data,),
+                    (data[1:],),
                     {"request": self},
                     callback=cb,
                 )
-                #response = api.Api().execute(data, request=self)
-                #if response is None:
-                #    return
-                #else:
-                #    self.response.append(response)
             else:
                 # We've got response on our request
                 api.Api.response(data)
@@ -94,7 +88,6 @@ class RequestHandler(object):
         except:
             logging.exception("")
             self.close()
-        #self.stream(self.STREAMOUT)
 
     def epollout(self):
         try:

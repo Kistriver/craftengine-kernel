@@ -77,7 +77,7 @@ class Api(object):
 
     @staticmethod
     def execute(data, request):
-        exc_methods = ["kernel.auth"]
+        exc_methods = ["auth"]
         identificator = None
         try:
             method, args, kwargs, identificator = data[:4]
@@ -87,7 +87,7 @@ class Api(object):
                 try:
                     pls = registry.Registry().get("api.plugins")
                     plugin = list(pls.keys())[list(pls.values()).index(request.fileno)]
-                except ValueError:
+                except ValueError as e:
                     raise AuthException
 
             function, perms_reqs = registry.Registry().hget("api.methods", method)
@@ -101,7 +101,14 @@ class Api(object):
 
             data = function(request, plugin, *args, **kwargs)
         except Exception as e:
-            error = ["%s.%s" % (getattr(e, "__module__", "__built_in__"), e.__class__.__name__), str(e), traceback.extract_tb(e.__traceback__)]
+            error = [
+                "%s.%s" % (
+                    getattr(e, "__module__", "__built_in__"),
+                    e.__class__.__name__,
+                ),
+                str(e),
+                traceback.extract_tb(e.__traceback__),
+            ]
             data = []
             logging.exception(e)
         else:
@@ -113,11 +120,12 @@ class Api(object):
         return identificator, error, data
 
     @staticmethod
-    def request(plugin, method, args=None, kwargs=None, callback=None):
+    def request(service, plugin, method, args=None, kwargs=None, callback=None):
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        identificator = None if callback is None else time.time()
+        identificator = None if callback is None else "%s:%s" % (service, time.time())
         request = [
+            service,
             method,
             args,
             kwargs,
@@ -179,15 +187,15 @@ def event_register(request, plugin, *args, **kwargs):
 
     return event.Event().register(*args, **kwargs)
 
-Api.bind("kernel.auth", kernel_auth)
-Api.bind("kernel.logger.log", Api.proxy_method(logging.log))
-Api.bind("kernel.logger.debug", Api.proxy_method(logging.debug))
-Api.bind("kernel.logger.info", Api.proxy_method(logging.info))
-Api.bind("kernel.logger.warning", Api.proxy_method(logging.warning))
-Api.bind("kernel.logger.error", Api.proxy_method(logging.error))
-Api.bind("kernel.logger.critical", Api.proxy_method(logging.critical))
+Api.bind("auth", kernel_auth)
+Api.bind("logger.log", Api.proxy_method(logging.log))
+Api.bind("logger.debug", Api.proxy_method(logging.debug))
+Api.bind("logger.info", Api.proxy_method(logging.info))
+Api.bind("logger.warning", Api.proxy_method(logging.warning))
+Api.bind("logger.error", Api.proxy_method(logging.error))
+Api.bind("logger.critical", Api.proxy_method(logging.critical))
 Api.bind(
-    "kernel.env",
+    "env",
     Api.proxy_property(craftengine.Kernel().env),
     "kernel.env"
 )
