@@ -107,7 +107,7 @@ class Api(object):
                     e.__class__.__name__,
                 ),
                 str(e),
-                traceback.extract_tb(e.__traceback__),
+                traceback.format_exc(),
             ]
             data = []
             logging.exception(e)
