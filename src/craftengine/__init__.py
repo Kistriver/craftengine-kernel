@@ -25,6 +25,10 @@ from craftengine import registry
 class Kernel(KernelModuleSingleton):
     alive = None
     _env = None
+    redis_l = None
+    redis_g = None
+    l = None
+    g = None
 
     def init(self, *args, **kwargs):
         self.alive = True

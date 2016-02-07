@@ -6,6 +6,8 @@ import hashlib
 import time
 import random
 import json
+import lupa
+import logging
 
 from craftengine.utils.exceptions import KernelException
 from craftengine import KernelModule
@@ -23,6 +25,10 @@ class ConsistencyException(RegistryException):
     pass
 
 
+class AccessException(RegistryException):
+    pass
+
+
 class _RegistryH(object):
     def __init__(self, r):
         self.r = r
@@ -30,10 +36,13 @@ class _RegistryH(object):
     def create(self, key):
         raise NotImplementedError
 
-    def get(self, key, **kwargs):
+    def get(self, meta_key, key, **kwargs):
         raise NotImplementedError
 
-    def set(self, key, **kwargs):
+    def set(self, meta_key, key, **kwargs):
+        raise NotImplementedError
+
+    def rem(self, meta_key, key, **kwargs):
         raise NotImplementedError
 
 
@@ -41,22 +50,33 @@ class _RegistryHStr(_RegistryH):
     def create(self, key):
         self.r.rd.set(self.r.data_key(key), "")
 
-    def get(self, key, **kwargs):
-        return self.r.rd.get(self.r.data_key(key))
+    def get(self, meta_key, key, **kwargs):
+        data = self.r.rd.get(self.r.data_key(key))
+        if data is None:
+            return None
+        else:
+            data = data.decode("utf-8")
+            return json.loads(data)
 
-    def set(self, key, **kwargs):
+    def set(self, meta_key, key, **kwargs):
         try:
             data = kwargs["data"]
         except KeyError:
             raise TypeError
+        data = json.dumps(data)
+
         return self.r.rd.set(self.r.data_key(key), data)
+
+    def rem(self, meta_key, key, **kwargs):
+        self.r.meta_rem(meta_key)
+        return self.r.rd.delete(self.r.data_key(key))
 
 
 class _RegistryHHash(_RegistryH):
     def create(self, key):
         pass
 
-    def get(self, key, **kwargs):
+    def get(self, meta_key, key, **kwargs):
         keys = list(kwargs.get("keys", []))
         if len(keys) == 0:
             return self.r.rd.hmgetall(self.r.data_key(key))
@@ -64,16 +84,33 @@ class _RegistryHHash(_RegistryH):
             data_bin = self.r.rd.hmget(self.r.data_key(key), keys)
             data = {}
             for i in range(len(keys)):
-                data[keys[i]] = data_bin[i]
+                try:
+                    data[keys[i]] = json.loads(data_bin[i].decode("utf-8"))
+                except AttributeError:
+                    data[keys[i]] = None
             return data
 
-    def set(self, key, **kwargs):
+    def set(self, meta_key, key, **kwargs):
         try:
             keys = dict(kwargs["keys"])
         except KeyError:
             raise TypeError
+        for k in keys.keys():
+            keys[k] = json.dumps(keys[k])
 
         return self.r.rd.hmset(self.r.data_key(key), keys)
+
+    def rem(self, meta_key, key, **kwargs):
+        try:
+            keys = dict(kwargs["keys"])
+        except KeyError:
+            keys = self.r.rd.hkeys(self.r.data_key(key))
+
+        p = self.r.rd.pipeline()
+        for k in keys:
+            p.hdel(self.r.data_key(key), k)
+        p.execute()
+        self.r.meta_rem(meta_key)
 
 
 class _RegistryHSet(_RegistryH):
@@ -98,7 +135,10 @@ class _DataLock(object):
         return self.r.meta_set(self.key, {"lock": self.mode})
 
     def __exit__(self, *_):
-        self.r.meta_set(self.key, {"lock": "rw"})
+        try:
+            self.r.meta_set(self.key, {"lock": "rw"})
+        except KeyError:
+            pass
 
 
 class _Registry(KernelModule):
@@ -127,6 +167,7 @@ class _Registry(KernelModule):
     rd = None
     _handlers = None
     prefix = ""
+    _rpc = None
 
     def init(self, *args, **kwargs):
         self._handlers = [
@@ -155,7 +196,7 @@ class _Registry(KernelModule):
         data["id"] = int(data["id"])
         data["lock"] = int(data["lock"])
         data["type"] = int(data["type"])
-        data["perms"] = json.loads(data["perms"])
+        data["handler"] = json.loads(data["handler"])
 
         return data
 
@@ -166,9 +207,9 @@ class _Registry(KernelModule):
         return self.prefixed(key, prefix="data")
 
     def _meta_set(self, key, meta):
-        meta["perms"] = json.dumps(meta["perms"])
         meta["lock"] = self.valid_lock_type(meta["lock"])
         meta["type"] = self.valid_data_type(meta["type"])
+        meta["handler"] = json.dumps(meta["handler"])
         return self.rd.hmset(self.meta_key(key), meta)
 
     def meta_set(self, key, fields):
@@ -188,11 +229,10 @@ class _Registry(KernelModule):
         else:
             return new_id
 
-    def meta_init(self, key, data_type, perms, handler, handler_lua):
+    def meta_init(self, key, data_type, handler, handler_lua):
         meta = {
             "id": 0,
             "type": data_type,
-            "perms": perms,
             "handler": handler,
             "handler_lua": handler_lua,
             "lock": "na",
@@ -207,6 +247,15 @@ class _Registry(KernelModule):
             return self.meta_get(key)
         else:
             raise ConsistencyException
+
+    def meta_rem(self, key):
+        keys = self.rd.hkeys(self.meta_key(key))
+        p = self.rd.pipeline()
+        if len(keys) == 0:
+            raise KeyError
+        for k in keys:
+            p.hdel(self.meta_key(key), k)
+        p.execute()
 
     def valid_data_type(self, data_type):
         if isinstance(data_type, str) and data_type.lower() in self.DATA_TYPES.keys():
@@ -228,12 +277,49 @@ class _Registry(KernelModule):
         data_type = self.valid_data_type(data_type)
         return self._handlers[data_type]
 
-    def create(self, key, perms=None, handler=None, handler_lua=None, data_type=None):
+    def handler(self, h, hl, *data):
+        if h is None:
+            self.handler_lua(hl, data)
+        elif h is True:
+            return
+        elif h is False:
+            raise AccessException
+        elif isinstance(h, list):
+            try:
+                self.rpc_handler(h, data)
+            except AccessException:
+                raise
+            except:
+                logging.exception("Could not process")
+                self.handler_lua(hl, data)
+        else:
+            raise TypeError(type(h))
+
+    @staticmethod
+    def handler_lua(h, data):
+        if h is None or h is True:
+            pass
+        elif h is False:
+            raise AccessException
+        elif isinstance(h, str):
+            lua = lupa.LuaRuntime(unpack_returned_tuples=True)
+            result = lua.eval(h)(*data)
+            if not result:
+                raise AccessException
+        else:
+            raise TypeError(type(h))
+
+    def rpc_handler(self, h, data):
+        service, method = h
+        result = self._rpc.sync_exec()(service, method)(*data)
+        if not result:
+            raise AccessException
+
+    def create(self, key, handler=None, handler_lua=None, data_type=None):
         kwargs = {
             "key": str(key),
-            "perms": [] if perms is None else list(perms),
-            "handler": "" if handler is None else str(handler),
-            "handler_lua": "" if handler_lua is None else str(handler_lua),
+            "handler": True if handler is None else list(handler),
+            "handler_lua": "function(method, key, data) return true end" if handler_lua is None else str(handler_lua),
             "data_type": self.valid_data_type("str" if data_type is None else data_type),
         }
 
@@ -246,25 +332,33 @@ class _Registry(KernelModule):
         if meta is None:
             raise KeyError
 
+        self.handler(meta["handler"], meta["handler_lua"], "get", key, kwargs)
+
         if meta["lock"] in [self.valid_lock_type(x) for x in ["rw", "ro"]]:
-            return self.data_handler(meta["type"]).get(meta["data_id"], **kwargs)
+            return self.data_handler(meta["type"]).get(key, meta["data_id"], **kwargs)
         else:
             raise LockException
 
     def set(self, key, **kwargs):
         with _DataLock(self, key) as meta:
-            return self.data_handler(meta["type"]).set(meta["data_id"], **kwargs)
+            self.handler(meta["handler"], meta["handler_lua"], "set", key, kwargs)
+            return self.data_handler(meta["type"]).set(key, meta["data_id"], **kwargs)
+
+    def rem(self, key, **kwargs):
+        with _DataLock(self, key, mode="na") as meta:
+            self.handler(meta["handler"], meta["handler_lua"], "rem", key, kwargs)
+            return self.data_handler(meta["type"]).rem(key, meta["data_id"], **kwargs)
 
 
 class Local(_Registry):
-    def init(self):
-        super().init()
+    def init(self, *args, **kwargs):
+        super().init(*args, **kwargs)
         self.rd = self.kernel.redis_l
         self.prefix = ""
 
 
 class Global(_Registry):
-    def init(self):
-        super().init()
+    def init(self, *args, **kwargs):
+        super().init(*args, **kwargs)
         self.rd = self.kernel.redis_g
         self.prefix = "global"
