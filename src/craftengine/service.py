@@ -4,12 +4,11 @@ __author__ = "Alexey Kachalov"
 
 import logging
 
-from craftengine import KernelModuleSingleton, Kernel
+from craftengine import KernelModuleSingleton
 from craftengine.utils.exceptions import KernelException
 from craftengine.utils.registry import (
     Registry,
     PermanentRegistry,
-    GlobalRegistry,
 )
 
 
@@ -26,22 +25,21 @@ class CollisionException(ServiceException):
 
 
 class Service(KernelModuleSingleton):
-    is_service = lambda service: service in Service.list().keys()
-    service_name = lambda service, num: "ce_%s_service_%i_%s" % (Kernel().env["CE_PROJECT_NAME"], num, service)
+    def is_service(self, service):
+        return service in self.list().keys()
 
-    @staticmethod
-    def list():
+    def service_name(self, service, num):
+        return "ce_%s_%s_service_%i_%s" % (self.kernel.env["CE_PROJECT_NAME"], self.kernel.env["CE_NODE_NAME"], num, service)
+
+    def list(self):
         try:
-            lst = PermanentRegistry().get("kernel.services")
+            return self.kernel.l.get("kernel.services")
         except KeyError:
-            PermanentRegistry().hash("kernel.services")
-            lst = {}
+            self.kernel.l.create("kernel.services")
+            return {}
 
-        return lst
-
-    @staticmethod
-    def start(service, num=None, force=None, remove=None):
-        if not Service.is_service(service):
+    def start(self, service, num=None, force=None, remove=None):
+        if not self.is_service(service):
             raise ServiceNotFoundException
 
         num = 1 if num is None else int(num)
@@ -49,20 +47,19 @@ class Service(KernelModuleSingleton):
         remove = True if remove is None else bool(remove)
 
         for i in range(1, num + 1):
-            Service._start(service, i, force, remove)
+            self._start(service, i, force, remove)
 
-    @staticmethod
-    def _start(service, num, force, remove):
+    def _start(self, service, num, force, remove):
         docker = Registry().get("kernel.docker")
 
-        container_name = Service.service_name(service, num)
+        container_name = self.service_name(service, num)
         try:
             if remove:
                 docker.remove_container(container=container_name, force=force)
         except:
             logging.exception("")
 
-        service_info = Service.list()[service]
+        service_info = self.list()[service]
 
         try:
             docker.create_container(
@@ -83,12 +80,17 @@ class Service(KernelModuleSingleton):
         except:
             logging.exception("")
 
-    def stop(self):
-        pass
+    def stop(self, service):
+        docker = Registry().get("kernel.docker")
+        for i in range(1, self.list()[service].get("scale", 1) + 1):
+            try:
+                docker.stop(container=self.service_name(service, i))
+                logging.info("'%s'[%i] service stopped" % (service, i))
+            except:
+                logging.exception("Error stopping service '%s'[%i]" % (service, i))
 
-    @staticmethod
-    def add(service, image, permissions):
-        if Service.is_service(service):
+    def add(self, service, image, permissions):
+        if self.is_service(service):
             raise CollisionException
 
         PermanentRegistry().hset(
@@ -102,17 +104,21 @@ class Service(KernelModuleSingleton):
             }
         )
 
-    @staticmethod
-    def remove(service):
-        if not Service.is_service(service):
+    def remove(self, service):
+        if not self.is_service(service):
             raise ServiceNotFoundException
 
-        Service.stop(service)
-        PermanentRegistry().hdelete("kernel.services", service)
+        self.stop(service)
+        docker = Registry().get("kernel.docker")
+        for i in range(1, self.list()[service].get("scale", 1) + 1):
+            try:
+                docker.remove_container(container=self.service_name(service, i), force=True)
+                logging.info("'%s'[%i] service removed" % (service, i))
+            except:
+                logging.exception("Error removing service '%s'[%i]" % (service, i))
 
-    @staticmethod
-    def scale(service, num, force=None):
-        if not Service.is_service(service):
+    def scale(self, service, num, force=None):
+        if not self.is_service(service):
             raise ServiceNotFoundException
 
         force = True if force is None else bool(force)
@@ -128,10 +134,10 @@ class Service(KernelModuleSingleton):
         if len(service_status) > num:
             for scale_i in range(num + 1, service_status + 1):
                 try:
-                    docker.remove_container(container=Service.service_name(service, scale_i), force=force)
+                    docker.remove_container(container=self.service_name(service, scale_i), force=force)
                 except:
                     pass
 
         elif len(service_status) < num:
             for scale_i in range(service_status + 1, num + 1):
-                Service._start(service, scale_i, force, True)
+                self._start(service, scale_i, force, True)

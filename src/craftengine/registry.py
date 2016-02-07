@@ -79,7 +79,14 @@ class _RegistryHHash(_RegistryH):
     def get(self, meta_key, key, **kwargs):
         keys = list(kwargs.get("keys", []))
         if len(keys) == 0:
-            return self.r.rd.hmgetall(self.r.data_key(key))
+            data_bin = self.r.rd.hgetall(self.r.data_key(key))
+            data = {}
+            for k, v in data_bin.items():
+                try:
+                    data[k.decode("utf-8")] = json.loads(v.decode("utf-8"))
+                except AttributeError:
+                    data[k.decode("utf-8")] = None
+            return data
         else:
             data_bin = self.r.rd.hmget(self.r.data_key(key), keys)
             data = {}
@@ -178,8 +185,9 @@ class _Registry(KernelModule):
         ]
 
     def prefixed(self, key, prefix, postfix=None):
-        prefix = "%s:" % prefix if prefix else ""
-        prefix += "%s:" % self.prefix if self.prefix else ""
+        _prefix = prefix
+        prefix = "%s:" % self.prefix if self.prefix else ""
+        prefix += "%s:" % _prefix if _prefix else ""
         postfix = ":%s" % postfix if postfix else ""
 
         return "".join([prefix, key, postfix])
@@ -219,7 +227,7 @@ class _Registry(KernelModule):
                 meta[k] = fields[k]
 
         self._meta_set(key, meta)
-        return meta
+        return self.meta_get(key)
 
     def meta_id_incr(self, key, rev_id):
         new_id = self.rd.hincrby(self.meta_key(key), "id")
@@ -318,7 +326,7 @@ class _Registry(KernelModule):
     def create(self, key, handler=None, handler_lua=None, data_type=None):
         kwargs = {
             "key": str(key),
-            "handler": True if handler is None else list(handler),
+            "handler": None if handler is None else list(handler),
             "handler_lua": "function(method, key, data) return true end" if handler_lua is None else str(handler_lua),
             "data_type": self.valid_data_type("str" if data_type is None else data_type),
         }
