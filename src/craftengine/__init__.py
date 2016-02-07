@@ -5,6 +5,7 @@ import logging
 import signal
 import threading
 import time
+import redis
 from docker import Client as Docker
 
 from craftengine.middleware.redis import Redis
@@ -18,6 +19,7 @@ from craftengine.utils.registry import (
     GlobalRegistry,
 )
 from craftengine.utils.exceptions import KernelException
+from craftengine import registry
 
 
 class Kernel(KernelModuleSingleton):
@@ -44,6 +46,23 @@ class Kernel(KernelModuleSingleton):
             db=int(self.env.get("REDIS_DB", 0)),
             password=self.env.get("REDIS_PASSWORD", None),
         ))
+
+        self.redis_l = redis.Redis(
+            host=self.env.get("REDIS_HOST", "redis"),
+            port=int(self.env.get("REDIS_PORT", 6379)),
+            db=int(self.env.get("REDIS_DB", 0)),
+            password=self.env.get("REDIS_PASSWORD", None),
+        )
+        self.l = registry.Local()
+
+        for key, t in {
+            "kernel.env": "hash",
+            "kernel.services": "hash",
+        }.items():
+            try:
+                self.l.create(key, data_type=t)
+            except registry.ConsistencyException:
+                pass
 
         Registry().hash("api.methods")
         Registry().hash("api.plugins")
