@@ -11,7 +11,6 @@ build:
 
 docker: build
 	if ! [ -e libs.tmp/ddp ]; then git clone git@git.kistriver.com:kistriver/ddp.git libs.tmp/ddp; fi
-	if ! [ -e libs.tmp/pycraftengine ]; then git clone git@git.kistriver.com:kistriver/craftengine-python.git libs.tmp/pycraftengine; fi
 	cp Dockerfile Dockerfile.tmp
 	sed -i "s|##CE_VER##|$(CE_VER)|" Dockerfile.tmp
 	docker build -t kistriver/ce-kernel:$(CE_VER) -f Dockerfile.tmp .

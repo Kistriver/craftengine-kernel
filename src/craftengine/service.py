@@ -6,10 +6,6 @@ import logging
 
 from craftengine import KernelModuleSingleton
 from craftengine.utils.exceptions import KernelException
-from craftengine.utils.registry import (
-    Registry,
-    PermanentRegistry,
-)
 
 
 class ServiceException(KernelException):
@@ -33,9 +29,9 @@ class Service(KernelModuleSingleton):
 
     def list(self):
         try:
-            return self.kernel.l.get("kernel.services")
+            return self.kernel.l.get("kernel/services")
         except KeyError:
-            self.kernel.l.create("kernel.services")
+            self.kernel.l.create("kernel/services")
             return {}
 
     def start(self, service, num=None, force=None, remove=None):
@@ -50,41 +46,41 @@ class Service(KernelModuleSingleton):
             self._start(service, i, force, remove)
 
     def _start(self, service, num, force, remove):
-        docker = Registry().get("kernel.docker")
-
         container_name = self.service_name(service, num)
         try:
             if remove:
-                docker.remove_container(container=container_name, force=force)
+                self.kernel.docker.remove_container(container=container_name, force=force)
         except:
             logging.exception("")
 
         service_info = self.list()[service]
 
         try:
-            docker.create_container(
+            self.kernel.docker.create_container(
                 image=service_info["image"],
                 detach=True,
                 name=container_name,
                 environment={
                     "CE_TOKEN": service_info["token"],
                     "CE_NAME": service,
+                    "CE_PORT": self.kernel.rpc.port,
+                    "CE_NODE": self.kernel.env["CE_NODE_NAME"],
+                    "CE_INSTANCE": num,
                 },
                 labels={
                     "CRAFTEngine": "True",
                     "Service": service,
                 },
             )
-            docker.start(container=container_name)
+            self.kernel.docker.start(container=container_name)
             logging.info("'%s'[%i] service started" % (service, num))
         except:
             logging.exception("")
 
     def stop(self, service):
-        docker = Registry().get("kernel.docker")
         for i in range(1, self.list()[service].get("scale", 1) + 1):
             try:
-                docker.stop(container=self.service_name(service, i))
+                self.kernel.docker.stop(container=self.service_name(service, i), timeout=1)
                 logging.info("'%s'[%i] service stopped" % (service, i))
             except:
                 logging.exception("Error stopping service '%s'[%i]" % (service, i))
@@ -93,15 +89,17 @@ class Service(KernelModuleSingleton):
         if self.is_service(service):
             raise CollisionException
 
-        PermanentRegistry().hset(
-            "kernel.services",
-            service,
-            {
-                "image": image,
-                "permissions": permissions,
-                # TODO: token on each kernel load
-                "token": "TOKEN",
-            }
+        self.kernel.l.set(
+            "kernel/services",
+            keys={
+                service: {
+                    "image": image,
+                    "permissions": permissions,
+                    "token": self.generate_token(),
+                    "scale": 1,
+                    "command": None,
+                }
+            },
         )
 
     def remove(self, service):
@@ -109,10 +107,9 @@ class Service(KernelModuleSingleton):
             raise ServiceNotFoundException
 
         self.stop(service)
-        docker = Registry().get("kernel.docker")
         for i in range(1, self.list()[service].get("scale", 1) + 1):
             try:
-                docker.remove_container(container=self.service_name(service, i), force=True)
+                self.kernel.docker.remove_container(container=self.service_name(service, i), force=True)
                 logging.info("'%s'[%i] service removed" % (service, i))
             except:
                 logging.exception("Error removing service '%s'[%i]" % (service, i))
@@ -123,9 +120,7 @@ class Service(KernelModuleSingleton):
 
         force = True if force is None else bool(force)
 
-        docker = Registry().get("kernel.docker")
-
-        service_status = docker.containers(
+        service_status = self.kernel.docker.containers(
             filters={
                 "label": "Service=\"%s\" CRAFTEngine=True" % service
             },
@@ -134,10 +129,14 @@ class Service(KernelModuleSingleton):
         if len(service_status) > num:
             for scale_i in range(num + 1, service_status + 1):
                 try:
-                    docker.remove_container(container=self.service_name(service, scale_i), force=force)
+                    self.kernel.docker.remove_container(container=self.service_name(service, scale_i), force=force)
                 except:
                     pass
 
         elif len(service_status) < num:
             for scale_i in range(service_status + 1, num + 1):
                 self._start(service, scale_i, force, True)
+
+    def generate_token(self):
+        # TODO: token on each kernel load
+        return "TOKEN"

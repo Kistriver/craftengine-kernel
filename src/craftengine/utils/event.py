@@ -4,14 +4,11 @@ __author__ = "Alexey Kachalov"
 
 import logging
 
-from craftengine import (
-    KernelModuleSingleton,
-    Kernel,
-)
+from craftengine import KernelModule
 from craftengine.utils.exceptions import KernelException
 
 
-class Event(KernelModuleSingleton):
+class Event(KernelModule):
     #
     # Only for one plugin
     #
@@ -46,18 +43,15 @@ class Event(KernelModuleSingleton):
         has_permission = has_permission if has_permission is not None else self._has_permission
         return self._add_callback(name, callback, has_permission, namespace)
 
-    def initiate(self, name, data=None, mutable_data=None, namespace=None):
+    def initiate(self, name, data=None, namespace=None):
         """
         Initiate event
         :param name: name of event
         :param data: data passing to callback
-        :param mutable_data: is `data` mutable from call to call
         :param namespace: namespace of event
-        :return: `data`
+        :return: None
         """
-        from craftengine import api
         namespace = namespace if namespace is not None else self.N_PLUGIN
-        mutable_data = False if mutable_data is None else mutable_data
         try:
             callbacks = self._callbacks[name]
         except KeyError:
@@ -68,25 +62,14 @@ class Event(KernelModuleSingleton):
                 continue
 
             if has_permission(name, namespace) is True:
-                # noinspection PyBroadException
                 try:
                     callback, req, pl = callback
-                    cb_data = api.Api.request(pl, "event.callback", args=(name, data))
-                    #if mutable_data:
-                    #    data = cb_data
-                except Exception:
-                    logging.exception("")
+                    # Call
+                except Exception as e:
+                    logging.exception(e)
 
         if namespace == self.N_GLOBAL:
-            """
-            for node in Kernel().node_list():
-                n_data = node.event.initiate(name, data, mutable_data, self.N_LOCAL)
-                if mutable_data:
-                    data = n_data
-            """
             raise KernelException("NIY")
-
-        return data
 
     def info(self, name):
         try:

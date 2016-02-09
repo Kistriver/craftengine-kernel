@@ -4,10 +4,23 @@ CRAFTEngine Kernel
 How to run
 ----------
 
-Run Redis and add test service:
-```bash
-docker run --name redis-ce redis
-redis-ce> SET DICT:REGISTRY:NODE:alpha:kernel.services "{\"test\": {\"token\": \"test_token\", \"image\": \"kistriver/py-test\", \"permissions\": [\"kernel\", \"registry\", \"event\"]}}"
+Add test service:
+* Start Kernel
+* Stop Kernel
+* Find meta:kernel/services in redis and copy `data_id`
+* Paste into data:`data_id`:{service_name}:
+```json
+{
+    "token": "test_token",
+    "image": "kistriver/py-test",
+    "permissions": [
+        "kernel",
+        "registry",
+        "event"
+    ],
+    "scale": 2,
+    "command": null
+}
 ```
 
 Compile CE Kernel:

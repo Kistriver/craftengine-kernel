@@ -6,12 +6,16 @@ import logging
 
 class KernelModule(object):
     kernel = None
+    _alive = None
+
+    alive = property(fget=lambda self: self._alive)
 
     def __init__(self, *args, **kwargs):
         logging.debug("Loading kernel module: %s" % self.__class__.__name__)
         from craftengine import Kernel
         self.kernel = Kernel()
         self.init(*args, **kwargs)
+        self._alive = True
 
     def init(self, *args, **kwargs):
         """
@@ -25,6 +29,7 @@ class KernelModule(object):
 
     def exit(self, *args, **kwargs):
         logging.debug("Unloading kernel module: %s" % self.__class__.__name__)
+        self._alive = False
 
 
 class KernelModuleSingleton(KernelModule):

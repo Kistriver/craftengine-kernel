@@ -11,7 +11,7 @@ params = os.environ
 
 logging.basicConfig(
     format="\033[0m[%(levelname)s][%(threadName)s][%(asctime)-15s] %(message)s\033[0m",
-    level=params.get("kernel.logging.level", "INFO"),
+    level=params.get("kernel.logging.level", params.get("logging_level", "INFO")),
 )
 
 kernel = Kernel(**params)

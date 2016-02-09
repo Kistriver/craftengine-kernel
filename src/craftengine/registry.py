@@ -9,11 +9,11 @@ import json
 import lupa
 import logging
 
-from craftengine.utils.exceptions import KernelException
+from craftengine.utils.exceptions import ModuleException
 from craftengine import KernelModule
 
 
-class RegistryException(KernelException):
+class RegistryException(ModuleException):
     pass
 
 

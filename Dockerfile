@@ -8,7 +8,7 @@ Description="This image is used to start CRAFTEngine core"
 
 RUN \
 apt-get update && \
-apt-get upgrade -y && \
+# apt-get upgrade -y && \
 apt-get install -y liblua5.2-dev
 
 WORKDIR /home/craftengine
