@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 __author__ = "Alexey Kachalov"
 
-
 import hashlib
 import time
 import random
 import json
-import lupa
 import logging
 
-from craftengine.utils.exceptions import ModuleException
-from craftengine import KernelModule
+import lupa
+from craftengine.exceptions import ModuleException
+from craftengine.modules import KernelModule
 
 
 class RegistryException(ModuleException):
@@ -121,11 +120,31 @@ class _RegistryHHash(_RegistryH):
 
 
 class _RegistryHSet(_RegistryH):
-    pass
+    def create(self, key):
+        raise NotImplementedError
+
+    def get(self, meta_key, key, **kwargs):
+        raise NotImplementedError
+
+    def set(self, meta_key, key, **kwargs):
+        raise NotImplementedError
+
+    def rem(self, meta_key, key, **kwargs):
+        raise NotImplementedError
 
 
 class _RegistryHSSet(_RegistryH):
-    pass
+    def create(self, key):
+        raise NotImplementedError
+
+    def get(self, meta_key, key, **kwargs):
+        raise NotImplementedError
+
+    def set(self, meta_key, key, **kwargs):
+        raise NotImplementedError
+
+    def rem(self, meta_key, key, **kwargs):
+        raise NotImplementedError
 
 
 class _DataLock(object):
@@ -244,8 +263,9 @@ class _Registry(KernelModule):
             "handler": handler,
             "handler_lua": handler_lua,
             "lock": "na",
-            "data_id": hashlib.sha512(str(random.random()).encode("utf-8")).hexdigest() +
-                       hashlib.sha512(str(time.time()).encode("utf-8")).hexdigest(),
+            "data_id":
+                hashlib.sha512(str(random.random()).encode("utf-8")).hexdigest() +
+                hashlib.sha512(str(time.time()).encode("utf-8")).hexdigest(),
         }
 
         try:
@@ -297,8 +317,8 @@ class _Registry(KernelModule):
                 self.rpc_handler(h, data)
             except AccessException:
                 raise
-            except:
-                logging.exception("Could not process")
+            except Exception as e:
+                logging.exception(e)
                 self.handler_lua(hl, data)
         else:
             raise TypeError(type(h))

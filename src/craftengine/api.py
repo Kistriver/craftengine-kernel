@@ -14,9 +14,9 @@ import traceback
 import time
 import threading
 
-from craftengine.utils.exceptions import ModuleException
+from craftengine.exceptions import ModuleException
 import craftengine
-from craftengine.utils import event
+from craftengine import event
 
 
 class ApiException(ModuleException):

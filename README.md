@@ -9,7 +9,7 @@ Add test service:
 * Stop Kernel
 * Find meta:kernel/services in redis and copy `data_id`
 * Paste into data:`data_id`:{service_name}:
-```json
+```
 {
     "token": "test_token",
     "image": "kistriver/py-test",

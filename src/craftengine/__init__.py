@@ -5,15 +5,12 @@ import logging
 import signal
 import threading
 import time
+
 import redis
 from docker import Client as Docker
 
-from craftengine.middleware.redis import Redis
-from craftengine.utils.modules import (
-    KernelModule,
-    KernelModuleSingleton,
-)
-from craftengine.utils.exceptions import KernelException
+from craftengine.modules import KernelModuleSingleton
+from craftengine.exceptions import KernelException
 from craftengine import registry, service, rpc
 
 
@@ -55,7 +52,7 @@ class Kernel(KernelModuleSingleton):
             "kernel/services": "hash",
         }.items():
             try:
-                self.l.create(key, data_type=t, handler=None, handler_lua=""" \
+                self.l.create(key, data_type=t, handler=None, handler_lua="""\
 function(method, key, data)
     if method == "get" then
         return true
@@ -63,7 +60,7 @@ function(method, key, data)
         return false
     end
 end\
-        """)
+""")
             except registry.ConsistencyException:
                 pass
 

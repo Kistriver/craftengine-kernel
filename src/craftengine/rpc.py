@@ -6,12 +6,11 @@ import select
 import logging
 import threading
 import traceback
-from multiprocessing.dummy import Pool as ThreadPool
+
 from ddp import DdpSocket
+from craftengine.exceptions import ModuleException
+from craftengine.modules import KernelModule
 
-
-from craftengine.utils.exceptions import ModuleException
-from craftengine import KernelModule
 
 # RPC
 # ["connect", "service", "instance", "token", {"params": True}]
@@ -234,7 +233,8 @@ class Router(object):
                     identificator,
                 )
 
-    def _process_response(self, service_obj, data):
+    @staticmethod
+    def _process_response(service_obj, data):
         identificator = None
         try:
             data, error, identificator = data

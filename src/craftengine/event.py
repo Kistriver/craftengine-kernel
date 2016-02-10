@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 __author__ = "Alexey Kachalov"
 
-
 import logging
 
-from craftengine import KernelModule
-from craftengine.utils.exceptions import KernelException
+from craftengine.modules import KernelModule
+from craftengine.exceptions import KernelException
 
 
 class Event(KernelModule):

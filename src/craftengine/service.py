@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 __author__ = "Alexey Kachalov"
 
-
 import logging
 
-from craftengine import KernelModuleSingleton
-from craftengine.utils.exceptions import KernelException
+from craftengine.modules import KernelModule
+from craftengine.exceptions import KernelException
 
 
 class ServiceException(KernelException):
@@ -20,7 +19,7 @@ class CollisionException(ServiceException):
     pass
 
 
-class Service(KernelModuleSingleton):
+class Service(KernelModule):
     def is_service(self, service):
         return service in self.list().keys()
 
@@ -138,5 +137,5 @@ class Service(KernelModuleSingleton):
                 self._start(service, scale_i, force, True)
 
     def generate_token(self):
-        # TODO: token on each kernel load
+        # TODO: generate token
         return "TOKEN"
