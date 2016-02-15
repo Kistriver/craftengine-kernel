@@ -6,7 +6,6 @@ import logging
 
 class KernelModule(object):
     kernel = None
-    _alive = None
 
     alive = property(fget=lambda self: self._alive)
 
@@ -15,7 +14,8 @@ class KernelModule(object):
         from craftengine import Kernel
         self.kernel = Kernel()
         self.init(*args, **kwargs)
-        self._alive = True
+        if not hasattr(self, "_alive"):
+            self._alive = True
 
     def init(self, *args, **kwargs):
         """

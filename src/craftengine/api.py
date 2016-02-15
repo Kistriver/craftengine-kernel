@@ -43,46 +43,6 @@ class Api(object):
         registry.Registry().hset("api.methods", name, (method, perms))
 
     @staticmethod
-    def has_permission(perms, reqs):
-        perms_splitter = lambda x: [i.split(".") for i in x]
-        def perms_merger(perms):
-            merged = {}
-            for perm in perms:
-                if len(perm) == 0:
-                    merged["*"] = True
-                    continue
-                if perm[0] not in merged.keys():
-                    merged[perm[0]] = []
-
-                if perm[0] == "*":
-                    merged["*"] = True
-                else:
-                    merged[perm[0]].append(perm[1:])
-
-            for k in merged.keys():
-                if merged[k] is not True:
-                    merged[k] = perms_merger(merged[k])
-
-            return merged
-
-        perms = perms_merger(perms_splitter(perms))
-        reqs = perms_splitter(reqs)
-
-        getter = lambda src, x: src.get("*", src.get(x, False))
-        for reqsi in reqs:
-            src = perms
-            for r in reqsi:
-                g = getter(src, r)
-                if isinstance(g, dict):
-                    src = g
-                elif g:
-                    return True
-                else:
-                    raise PermissionException(str(".".join(reqsi)))
-        else:
-            return True
-
-    @staticmethod
     def execute(data, request):
         exc_methods = ["auth"]
         identificator = None

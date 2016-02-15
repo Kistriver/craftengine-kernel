@@ -20,6 +20,15 @@ run: docker
 	docker run --name ce-kernel -ti --rm -e REDIS_PORT=6379 -e CE_PROJECT_NAME="CRAFTEngine" -e CE_NODE_NAME="alpha" \
 	--link ce-redis:redis -p 2011:2011 -v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
 
+cluster: docker
+	-docker rm -f ce-kernel-alpha ce-kernel-beta
+	docker run --name ce-kernel-alpha -d -e REDIS_PORT=6379 -e REDIS_DB=0 -e CE_PROJECT_NAME="CRAFTEngine" \
+	-e CE_NODE_NAME="alpha" --link ce-redis:redis -p 2011:2011 \
+	-v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
+	docker run --name ce-kernel-beta -d -e REDIS_PORT=6379 -e REDIS_DB=2 -e CE_PROJECT_NAME="CRAFTEngine" \
+	-e CE_NODE_NAME="beta" --link ce-redis:redis -p 2012:2012 \
+	-v /var/run/docker.sock:/var/run/docker.sock --privileged kistriver/ce-kernel
+
 clean:
 	-rm -rf */__pycache__
 	-rm -r *.tmp

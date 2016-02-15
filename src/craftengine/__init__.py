@@ -11,7 +11,12 @@ from docker import Client as Docker
 
 from craftengine.modules import KernelModuleSingleton
 from craftengine.exceptions import KernelException
-from craftengine import registry, service, rpc
+from craftengine import (
+    registry,
+    service,
+    rpc,
+    node,
+)
 
 
 class Kernel(KernelModuleSingleton):
@@ -23,6 +28,7 @@ class Kernel(KernelModuleSingleton):
     g = None
     service = None
     rpc = None
+    node = None
     docker = None
 
     def init(self, *args, **kwargs):
@@ -74,13 +80,19 @@ end\
         self.g = registry.Global()
 
         self.service = service.Service()
-        self.rpc = rpc.Rpc(**self.l.get("kernel/env", keys=["host", "port"]))
+
+        self.rpc = rpc.Rpc()
+
+        np = self.l.get("kernel/env", keys=["node"]).get("node")
+        np = {} if np is None else np
+        node_host, node_port = np.get("host", "0.0.0.0"), np.get("port", 2011)
+        self.node = node.Rpc(host=node_host, port=node_port)
 
         try:
             self.kernel.g.create("kernel/nodes", data_type="hash")
         except registry.ConsistencyException:
             pass
-        self.kernel.g.set("kernel/nodes", keys={self.kernel.env["CE_NODE_NAME"]: self.rpc.real_host})
+        # self.kernel.g.set("kernel/nodes", keys={self.kernel.env["CE_NODE_NAME"]: self.rpc.real_host})
 
         self.docker = Docker(base_url="unix://var/run/docker.sock")
 

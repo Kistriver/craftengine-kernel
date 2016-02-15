@@ -2,6 +2,7 @@
 __author__ = "Alexey Kachalov"
 
 import logging
+import socket
 
 from craftengine.modules import KernelModule
 from craftengine.exceptions import KernelException
@@ -62,7 +63,6 @@ class Service(KernelModule):
                 environment={
                     "CE_TOKEN": service_info["token"],
                     "CE_NAME": service,
-                    "CE_PORT": self.kernel.rpc.port,
                     "CE_NODE": self.kernel.env["CE_NODE_NAME"],
                     "CE_INSTANCE": num,
                 },
@@ -70,6 +70,11 @@ class Service(KernelModule):
                     "CRAFTEngine": "True",
                     "Service": service,
                 },
+                host_config=self.kernel.docker.create_host_config(
+                    links={
+                        socket.gethostname(): "ce-kernel",
+                    },
+                ),
             )
             self.kernel.docker.start(container=container_name)
             logging.info("'%s'[%i] service started" % (service, num))
