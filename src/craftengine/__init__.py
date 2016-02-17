@@ -116,6 +116,12 @@ end\
         if not self.rpc.alive:
             raise KernelException("RPC Server start failed")
 
+        for node in self.g.get("kernel/nodes").keys():
+            if node == self.rpc.router.name:
+                continue
+
+            self.rpc.node(node)
+
         lst = self.service.list()
         for k, v in lst.items():
             self.service.start(k, num=v.get("scale", 1))

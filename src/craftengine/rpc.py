@@ -6,6 +6,7 @@ import select
 import logging
 import threading
 import traceback
+import time
 
 from ddp import DdpSocket
 from craftengine.exceptions import ModuleException
@@ -79,10 +80,10 @@ class BaseHandler(object):
         self.router.del_socket(fn)
         sock.close()
 
-    def process(self, fn, data):
+    def process(self, fn, data, add=None):
         case = data.pop(0)
         if case in self.binds.keys():
-            self.binds[case](fn, data)
+            self.binds[case](fn, data, add)
         else:
             raise RouteException("Unexpected route case: %s" % case)
 
@@ -103,7 +104,7 @@ class RegularHandler(BaseHandler):
         logging.info("Closed connection (%s:%i)" % (host, port))
         super().socket_close(fn)
 
-    def process_service(self, fn, data):
+    def process_service(self, fn, data, _=None):
         service, instance, token, params = data
         service_data = self.kernel.service.list().get(service)
         if service_data is None:
@@ -119,13 +120,13 @@ class RegularHandler(BaseHandler):
         services_handler.put_service(service, instance, fn)
         logging.info("Service authed: `%s`[%i]" % (service, instance))
 
-    def process_node(self, fn, data):
+    def process_node(self, fn, data, _=None):
         node, token, params = data
-        service_data = self.kernel.g.get("kernel/nodes", keys=[node]).get(node)
-        if service_data is None:
+        node_data = self.kernel.g.get("kernel/nodes", keys=[node]).get(node)
+        if node_data is None:
             raise RouteException("Node doesn't exist")
 
-        if token != service_data["token"]:
+        if token != node_data["token"]:
             raise RouteException("Invalid token")
 
         node_handler = self.router.get_handler(self.router.SOCK_NODE)
@@ -174,8 +175,12 @@ class ServiceHandler(BaseHandler):
 
         self.router.epollout(requested_fn)
 
-    def process_request(self, fn, data):
-        from_service = self.get_service_by_socket(fn)
+    def process_request(self, fn, data, add=None):
+        if add is None:
+            from_service = self.get_service_by_socket(fn)
+            req_from = self.router.name, from_service[0], from_service[1]
+        else:
+            req_from = add
 
         rid = None
         try:
@@ -184,10 +189,19 @@ class ServiceHandler(BaseHandler):
             instance = self.BALANCED_INSTANCE if instance is None else int(instance)
             if node not in ["__local__", self.router.name]:
                 handler = self.router.get_handler(self.router.SOCK_NODE)
-                req_from = self.router.name, from_service[0], from_service[1]
-                handler.process(fn, [handler.PROCESS_PROXY, node, req_from, data])
+                node_fn = handler.get_node(node)
+                handler.process(node_fn, [
+                    handler.PROCESS_PROXY,
+                    node,
+                    req_from,
+                    [self.PROCESS_REQUEST, (node, service, instance), method, args, kwargs, rid],
+                    self.router.generate_id(),
+                ])
+
+                if rid is not None:
+                    sock_info = self.router.get_socket(node_fn)
+                    sock_info["responses"][rid] = (fn, req_from)
             else:
-                req_from = self.router.name, from_service[0], from_service[1]
                 req = node, service, instance
 
                 self.request(fn, req_from, req, method, args, kwargs, rid)
@@ -207,11 +221,10 @@ class ServiceHandler(BaseHandler):
 
                 self.process(fn, [self.PROCESS_RESPONSE, None, error, rid])
 
-    def process_response(self, fn, data):
+    def process_response(self, fn, data, _=None):
         response, error, rid = data
         sock_info = self.router.get_socket(fn)
         response_fn, req_from = sock_info["responses"][rid]
-        from_service = self.get_service_by_socket(fn)
 
         response_sock_info = self.router.get_socket(response_fn)
         if response_sock_info["type"] == self.router.SOCK_SERVICE:
@@ -223,9 +236,16 @@ class ServiceHandler(BaseHandler):
             ])
             self.router.epollout(response_fn)
         else:
+            from_service = self.get_service_by_socket(fn)
             handler = self.router.get_handler(self.router.SOCK_NODE)
             resp_from = self.router.name, from_service[0], from_service[1]
-            handler.process(response_fn, [handler.PROCESS_PROXY, req_from[0], resp_from, data])
+            handler.process(response_fn, [
+                handler.PROCESS_PROXY,
+                req_from[0],
+                resp_from,
+                [self.PROCESS_RESPONSE, response, error, rid],
+                self.router.generate_id(),
+            ])
 
         del sock_info["responses"][rid]
 
@@ -298,29 +318,40 @@ class NodeHandler(BaseHandler):
         self._lock = threading.RLock()
 
     def socket_close(self, fn):
-        node = self.router.get_node(fn)
+        node = self.get_node_by_socket(fn)
         logging.info("Closed connection with node `%s`" % node)
         super().socket_close(fn)
 
-    def process_proxy(self, fn, data):
+    def process_proxy(self, fn, data, _=None):
         node, req_from, command, rid = data
         if node == self.router.name:
             handler = self.router.get_handler(self.router.SOCK_SERVICE)
-            handler.process(fn, command)
+            handler.process(fn, command, req_from)
         else:
-            raise NotImplementedError
+            proxy_node = self.get_node(node)
+            sock_info = self.router.get_socket(proxy_node)
+            sock_info["send_data"].append([
+                self.PROCESS_PROXY,
+                node,
+                req_from,
+                command,
+                rid,
+            ])
+            self.router.epollout(proxy_node)
 
-    def process_proxy_status(self, fn, data):
+    def process_proxy_status(self, fn, data, _=None):
         error, rid = data
 
     def put_node(self, node, fn):
         try:
             self.get_node(node)
             self.socket_close(self._nodes[node])
-        finally:
-            self._nodes[node] = fn
-            self.router.set_type_socket(fn, self.router.SOCK_NODE)
-            self._nodes_fn[fn] = node
+        except RouteException:
+            pass
+
+        self._nodes[node] = fn
+        self.router.set_type_socket(fn, self.router.SOCK_NODE)
+        self._nodes_fn[fn] = node
 
     def get_node(self, node):
         try:
@@ -328,7 +359,7 @@ class NodeHandler(BaseHandler):
         except KeyError:
             raise RouteException("Node doesn't exist")
 
-    def del_service(self, node):
+    def del_node(self, node):
         try:
             fn = self._nodes[node]
             self.socket_close(fn)
@@ -359,10 +390,11 @@ class Router(object):
             self.SOCK_NODE: NodeHandler(self),
         }
 
-    def add_socket(self, sock, address):
+    def add_socket(self, sock, address, sock_type=None):
+        sock_type = self.SOCK_REG if sock_type is None else sock_type
         # [socket, address, type, send_data, responses]
         self.rpc.epoll.register(sock, select.EPOLLIN)
-        self._sockets[sock.fileno()] = [sock, address, self.SOCK_REG, [], {}]
+        self._sockets[sock.fileno()] = [sock, address, sock_type, [], {}]
 
     def get_socket(self, fn):
         sock, address, sock_type, send_data, responses = self._sockets[fn]
@@ -407,6 +439,9 @@ class Router(object):
 
     def epollout(self, fn):
         self.rpc.epoll.modify(fn, select.EPOLLOUT)
+
+    def generate_id(self):
+        return "%s" % (time.time())
 
     def stop(self):
         for fn in self._sockets.copy().keys():
@@ -470,6 +505,31 @@ class Rpc(KernelModule):
                 self.serve()
         else:
             self.stop()
+
+    def node(self, node):
+        try:
+            self_node = self.router.name
+            node_data = self.kernel.g.get("kernel/nodes", keys=[node]).get(node)
+            self_node_data = self.kernel.g.get("kernel/nodes", keys=[self_node]).get(self_node)
+            address = tuple(node_data["address"])
+            connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            connection.connect(address)
+            self.router.add_socket(sock=connection, address=address, sock_type=self.router.SOCK_NODE)
+            fn = connection.fileno()
+            self.router.get_handler(self.router.SOCK_NODE).put_node(node, fn)
+            sock_info = self.router.get_socket(fn)
+            token = self_node_data["token"]
+
+            sock_info["send_data"].append([
+                RegularHandler.PROCESS_NODE,
+                self_node,
+                token,
+                {},
+            ])
+            self.router.epollout(fn)
+        except Exception as e:
+            logging.exception(e)
 
     def stop(self):
         if self._stop:
