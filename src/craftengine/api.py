@@ -1,15 +1,22 @@
 # -*- coding: utf-8 -*-
 __author__ = "Alexey Kachalov"
 
+"""
+========================================
+ATTENTION!
+
+HAVE TO REFACTOR
+========================================
+"""
+
 import logging
 import traceback
 import time
 import threading
 
-from craftengine.utils.exceptions import ModuleException
+from craftengine.exceptions import ModuleException
 import craftengine
-from craftengine.utils import registry
-from craftengine.utils import event
+from craftengine import event
 
 
 class ApiException(ModuleException):
@@ -36,46 +43,6 @@ class Api(object):
         registry.Registry().hset("api.methods", name, (method, perms))
 
     @staticmethod
-    def has_permission(perms, reqs):
-        perms_splitter = lambda x: [i.split(".") for i in x]
-        def perms_merger(perms):
-            merged = {}
-            for perm in perms:
-                if len(perm) == 0:
-                    merged["*"] = True
-                    continue
-                if perm[0] not in merged.keys():
-                    merged[perm[0]] = []
-
-                if perm[0] == "*":
-                    merged["*"] = True
-                else:
-                    merged[perm[0]].append(perm[1:])
-
-            for k in merged.keys():
-                if merged[k] is not True:
-                    merged[k] = perms_merger(merged[k])
-
-            return merged
-
-        perms = perms_merger(perms_splitter(perms))
-        reqs = perms_splitter(reqs)
-
-        getter = lambda src, x: src.get("*", src.get(x, False))
-        for reqsi in reqs:
-            src = perms
-            for r in reqsi:
-                g = getter(src, r)
-                if isinstance(g, dict):
-                    src = g
-                elif g:
-                    return True
-                else:
-                    raise PermissionException(str(".".join(reqsi)))
-        else:
-            return True
-
-    @staticmethod
     def execute(data, request):
         exc_methods = ["auth"]
         identificator = None
@@ -85,9 +52,9 @@ class Api(object):
             plugin = None
             if method not in exc_methods:
                 try:
-                    pls = registry.Registry().get("api.plugins")
-                    plugin = list(pls.keys())[list(pls.values()).index(request.fileno)]
-                except ValueError as e:
+                    pls = registry.Registry().get("api.authed")
+                    plugin = pls[request.fileno]
+                except KeyError:
                     raise AuthException
 
             function, perms_reqs = registry.Registry().hget("api.methods", method)
@@ -107,7 +74,7 @@ class Api(object):
                     e.__class__.__name__,
                 ),
                 str(e),
-                traceback.extract_tb(e.__traceback__),
+                traceback.format_exc(),
             ]
             data = []
             logging.exception(e)
@@ -120,11 +87,12 @@ class Api(object):
         return identificator, error, data
 
     @staticmethod
-    def request(service, plugin, method, args=None, kwargs=None, callback=None):
+    def request(node, service, plugin, method, args=None, kwargs=None, callback=None):
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         identificator = None if callback is None else "%s:%s" % (service, time.time())
         request = [
+            node,
             service,
             method,
             args,
@@ -136,7 +104,7 @@ class Api(object):
             registry.Registry().hset("api.requests", identificator, callback)
 
         fn = registry.Registry().hget("api.plugins", plugin)
-        cli = registry.Registry().hget("api.pool", fn)
+        cli = registry.Registry().hget("api.pool", fn[0])
         cli.response.append(request)
         cli.stream(cli.STREAMOUT)
         return identificator
@@ -172,7 +140,14 @@ def kernel_auth(request, p, plugin, token):
         return False
 
     if pl["token"] == token:
-        registry.Registry().hset("api.plugins", pl["name"], request.fileno)
+        with registry.Registry()._lock:
+            try:
+                a = registry.Registry().hget("api.plugins", pl["name"])
+            except KeyError:
+                a = []
+            a.append(request.fileno)
+            registry.Registry().hset("api.plugins", pl["name"], a)
+        registry.Registry().hset("api.authed", request.fileno, pl["name"])
         return True
     else:
         return False

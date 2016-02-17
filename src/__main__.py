@@ -10,8 +10,8 @@ from craftengine import Kernel
 params = os.environ
 
 logging.basicConfig(
-    format="\033[0m[%(levelname)s][%(threadName)s][%(asctime)-15s] %(message)s\033[0m",
-    level=params.get("kernel.logging.level", "INFO"),
+    format="\033[0m[%(levelname)s][%(threadName)s][%(pathname)s:%(lineno)s][%(asctime)-15s] \n%(message)s\033[0m\n",
+    level=params.get("kernel.logging.level", params.get("logging_level", "INFO")),
 )
 
 kernel = Kernel(**params)

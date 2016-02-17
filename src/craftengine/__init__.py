@@ -5,24 +5,30 @@ import logging
 import signal
 import threading
 import time
+
+import redis
 from docker import Client as Docker
 
-from craftengine.middleware.redis import Redis
-from craftengine.utils.modules import (
-    KernelModule,
-    KernelModuleSingleton,
+from craftengine.modules import KernelModuleSingleton
+from craftengine.exceptions import KernelException
+from craftengine import (
+    registry,
+    service,
+    rpc,
 )
-from craftengine.utils.registry import (
-    Registry,
-    PermanentRegistry,
-    GlobalRegistry,
-)
-from craftengine.utils.exceptions import KernelException
 
 
 class Kernel(KernelModuleSingleton):
     alive = None
     _env = None
+    redis_l = None
+    redis_g = None
+    l = None
+    g = None
+    service = None
+    rpc = None
+    node = None
+    docker = None
 
     def init(self, *args, **kwargs):
         self.alive = True
@@ -38,79 +44,89 @@ class Kernel(KernelModuleSingleton):
         signal.signal(signal.SIGINT, self.exit)
         signal.signal(signal.SIGPWR, self.exit)
 
-        Registry().set("kernel.redis", Redis(
-            host=self.env.get("REDIS_HOST", "redis"), 
+        self.redis_l = redis.Redis(
+            host=self.env.get("REDIS_HOST", "redis"),
             port=int(self.env.get("REDIS_PORT", 6379)),
             db=int(self.env.get("REDIS_DB", 0)),
             password=self.env.get("REDIS_PASSWORD", None),
-        ))
+        )
+        self.l = registry.Local()
 
-        Registry().hash("api.methods")
-        Registry().hash("api.plugins")
+        for key, t in {
+            "kernel/env": "hash",
+            "kernel/services": "hash",
+        }.items():
+            try:
+                self.l.create(key, data_type=t, handler=None, handler_lua="""\
+function(method, key, data)
+    if method == "get" then
+        return true
+    else
+        return false
+    end
+end\
+""")
+            except registry.ConsistencyException:
+                pass
 
-        Registry().set("kernel.docker", Docker(base_url="unix://var/run/docker.sock"))
+        redis_g = self.l.get("kernel/env", keys=["REDIS_HOST", "REDIS_PORT", "REDIS_DB", "REDIS_PASSWORD"])
+        self.redis_g = redis.Redis(
+            host=redis_g["REDIS_HOST"],
+            port=redis_g["REDIS_PORT"],
+            db=redis_g["REDIS_DB"],
+            password=redis_g["REDIS_PASSWORD"],
+        )
+        self.g = registry.Global()
+
+        self.service = service.Service()
+
+        self.rpc = rpc.Rpc()
+
+        try:
+            self.kernel.g.create("kernel/nodes", data_type="hash")
+        except registry.ConsistencyException:
+            pass
+        # self.kernel.g.set("kernel/nodes", keys={self.kernel.env["CE_NODE_NAME"]: self.rpc.real_host})
+
+        self.docker = Docker(base_url="unix://var/run/docker.sock")
 
     def exit(self, *args, **kwargs):
         if not self.alive:
             return
-        self.alive = False
+        self._alive = False
 
         try:
             logging.info("Stopping kernel...")
             super().exit(*args, **kwargs)
 
-            pls = GlobalRegistry().get("kernel.plugins")
-            docker = Registry().get("kernel.docker")
-            for pl in pls.values():
-                try:
-                    docker.remove_container(container=pl["name"], force=True)
-                    logging.info("'%s' service stopped" % pl["name"])
-                except:
-                    pass
+            lst = self.service.list()
+            for k, v in lst.items():
+                self.service.stop(k)
 
-            server = Registry().get("server")
-            server.shutdown()
-        except:
-            logging.exception("")
+            self.rpc.exit(*args, **kwargs)
+        except Exception as e:
+            logging.exception(e)
             self.alive = True
 
     def serve(self):
-        from craftengine.utils.rpc import RpcServer
-        server = RpcServer((
-            self.env.get("rpc.host", "0.0.0.0"),
-            int(self.env.get("rpc.port", 2011))
-        ))
-        Registry().set("server", server)
-        threading.Thread(target=server.serve_forever, name="kernel.rpc").start()
-        while self.alive and server.alive is None:
+        threading.Thread(target=self.rpc.serve, name="kernel.rpc").start()
+        while self.alive and self.rpc.alive is None:
             time.sleep(0.1)
 
-        if not server.alive:
+        if not self.rpc.alive:
             raise KernelException("RPC Server start failed")
 
-        pls = GlobalRegistry().get("kernel.plugins")
-        docker = Registry().get("kernel.docker")
-        for pl in pls.values():
-            try:
-                docker.remove_container(container=pl["name"], force=True)
-            except:
-                pass
-            docker.create_container(
-                image=pl["image"],
-                detach=True,
-                name=pl["name"],
-                environment={
-                    "CE_TOKEN": pl["token"],
-                    "CE_NAME": pl["name"],
-                },
-                labels={
-                    "CRAFTEngine": "True",
-                },
-            )
-            docker.start(container=pl["name"])
-            logging.info("'%s' service started" % pl["name"])
+        for node in self.g.get("kernel/nodes").keys():
+            if node == self.rpc.router.name:
+                continue
 
-        while self.alive and server.alive:
+            self.rpc.node(node)
+
+        lst = self.service.list()
+        for k, v in lst.items():
+            self.service.start(k, num=v.get("scale", 1))
+
+        while self.alive and self.rpc.alive:
             time.sleep(1)
 
     @property
