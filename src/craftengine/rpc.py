@@ -43,10 +43,10 @@ class NodeException(RpcException):
 
 
 class BaseHandler(object):
-    def __init__(self, rpc):
-        self.rpc = rpc
-        self.kernel = self.rpc.kernel
-        self.router = self.rpc.router
+    def __init__(self, router):
+        self.rpc = router.rpc
+        self.kernel = router.rpc.kernel
+        self.router = router
         self.binds = {}
 
     def socket_receive(self, fn):
@@ -91,8 +91,8 @@ class RegularHandler(BaseHandler):
     PROCESS_SERVICE = "connect"
     PROCESS_NODE = "connect_node"
 
-    def __init__(self, rpc):
-        super().__init__(rpc)
+    def __init__(self, router):
+        super().__init__(router)
         self.binds = {
             self.PROCESS_SERVICE: self.process_service,
             self.PROCESS_NODE: self.process_node,
@@ -115,7 +115,7 @@ class RegularHandler(BaseHandler):
         if not 1 <= instance <= service_data.get("scale", 1):
             raise RouteException("Unexpected instance")
 
-        services_handler = self.router.handler(self.router.SOCK_SERVICE)
+        services_handler = self.router.get_handler(self.router.SOCK_SERVICE)
         services_handler.put_service(service, instance, fn)
         logging.info("Service authed: `%s`[%i]" % (service, instance))
 
@@ -128,7 +128,7 @@ class RegularHandler(BaseHandler):
         if token != service_data["token"]:
             raise RouteException("Invalid token")
 
-        node_handler = self.router.handler(self.router.SOCK_NODE)
+        node_handler = self.router.get_handler(self.router.SOCK_NODE)
         node_handler.put_node(node, fn)
         logging.info("Node authed: `%s`" % node)
 
@@ -139,8 +139,8 @@ class ServiceHandler(BaseHandler):
     PROCESS_REQUEST = "request"
     PROCESS_RESPONSE = "response"
 
-    def __init__(self, rpc):
-        super().__init__(rpc)
+    def __init__(self, router):
+        super().__init__(router)
         self.binds = {
             self.PROCESS_REQUEST: self.process_request,
             self.PROCESS_RESPONSE: self.process_response,
@@ -151,7 +151,7 @@ class ServiceHandler(BaseHandler):
         self._lock = threading.RLock()
 
     def socket_close(self, fn):
-        service, instance = self.router.get_service_by_socket(fn)
+        service, instance = self.get_service_by_socket(fn)
         logging.info("Closed connection with service `%s`[%i]" % (service, instance))
         super().socket_close(fn)
 
@@ -172,6 +172,8 @@ class ServiceHandler(BaseHandler):
         if rid is not None:
             requested_sock_info["responses"][rid] = (fn, req_from)
 
+        self.router.epollout(requested_fn)
+
     def process_request(self, fn, data):
         from_service = self.get_service_by_socket(fn)
 
@@ -181,18 +183,14 @@ class ServiceHandler(BaseHandler):
             logging.debug(data)
             instance = self.BALANCED_INSTANCE if instance is None else int(instance)
             if node not in ["__local__", self.router.name]:
-                handler = self.router.handler(self.router.SOCK_NODE)
+                handler = self.router.get_handler(self.router.SOCK_NODE)
                 req_from = self.router.name, from_service[0], from_service[1]
-                handler.process(fn, (handler.PROCESS_PROXY, node, req_from, data))
+                handler.process(fn, [handler.PROCESS_PROXY, node, req_from, data])
             else:
-                requested_fn = self.get_service(service, instance)
-                requested_sock_info = self.router.get_socket(requested_fn)
                 req_from = self.router.name, from_service[0], from_service[1]
                 req = node, service, instance
 
                 self.request(fn, req_from, req, method, args, kwargs, rid)
-
-                self.rpc.epollout(fn)
         except Exception as e:
             logging.exception(e)
             if rid is None:
@@ -207,7 +205,7 @@ class ServiceHandler(BaseHandler):
                     traceback.format_exc(),
                 ]
 
-                self.process(fn, (self.PROCESS_RESPONSE, None, error, rid))
+                self.process(fn, [self.PROCESS_RESPONSE, None, error, rid])
 
     def process_response(self, fn, data):
         response, error, rid = data
@@ -217,16 +215,17 @@ class ServiceHandler(BaseHandler):
 
         response_sock_info = self.router.get_socket(response_fn)
         if response_sock_info["type"] == self.router.SOCK_SERVICE:
-            response_fn["send_data"].append(
+            response_sock_info["send_data"].append([
                 self.PROCESS_RESPONSE,
+                response,
                 error,
-                data,
                 rid,
-            )
+            ])
+            self.router.epollout(response_fn)
         else:
-            handler = self.router.handler(self.router.SOCK_NODE)
+            handler = self.router.get_handler(self.router.SOCK_NODE)
             resp_from = self.router.name, from_service[0], from_service[1]
-            handler.process(response_fn, (handler.PROCESS_PROXY, req_from[0], resp_from, data))
+            handler.process(response_fn, [handler.PROCESS_PROXY, req_from[0], resp_from, data])
 
         del sock_info["responses"][rid]
 
@@ -288,8 +287,8 @@ class NodeHandler(BaseHandler):
     PROCESS_PROXY = "proxy"
     PROCESS_PROXY_STATUS = "proxy_status"
 
-    def __init__(self, rpc):
-        super().__init__(rpc)
+    def __init__(self, router):
+        super().__init__(router)
         self.binds = {
             self.PROCESS_PROXY: self.process_proxy,
             self.PROCESS_PROXY_STATUS: self.process_proxy_status,
@@ -306,7 +305,7 @@ class NodeHandler(BaseHandler):
     def process_proxy(self, fn, data):
         node, req_from, command, rid = data
         if node == self.router.name:
-            handler = self.router.handler(self.router.SOCK_SERVICE)
+            handler = self.router.get_handler(self.router.SOCK_SERVICE)
             handler.process(fn, command)
         else:
             raise NotImplementedError
@@ -355,9 +354,9 @@ class Router(object):
         self.name = self.kernel.env["CE_NODE_NAME"]
         self._sockets = {}
         self._handlers = {
-            self.SOCK_REG: RegularHandler(self.rpc),
-            self.SOCK_SERVICE: ServiceHandler(self.rpc),
-            self.SOCK_NODE: NodeHandler(self.rpc),
+            self.SOCK_REG: RegularHandler(self),
+            self.SOCK_SERVICE: ServiceHandler(self),
+            self.SOCK_NODE: NodeHandler(self),
         }
 
     def add_socket(self, sock, address):
@@ -376,7 +375,7 @@ class Router(object):
         }
 
     def set_type_socket(self, fn, t):
-        self._sockets[fn]["type"] = t
+        self._sockets[fn][2] = t
 
     def del_socket(self, fn):
         del self._sockets[fn]
