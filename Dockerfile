@@ -6,6 +6,8 @@ Vendor="Kistriver" \
 Version="##CE_VER##" \
 Description="This image is used to start CRAFTEngine core"
 
+EXPOSE 2011
+
 RUN \
 apt-get update && \
 # apt-get upgrade -y && \

@@ -83,11 +83,6 @@ end\
 
         self.rpc = rpc.Rpc()
 
-        np = self.l.get("kernel/env", keys=["node"]).get("node")
-        np = {} if np is None else np
-        node_host, node_port = np.get("host", "0.0.0.0"), np.get("port", 2011)
-        self.node = node.Rpc(host=node_host, port=node_port)
-
         try:
             self.kernel.g.create("kernel/nodes", data_type="hash")
         except registry.ConsistencyException:
