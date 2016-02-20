@@ -161,6 +161,11 @@ class ServiceHandler(BaseHandler):
         requested_fn = self.get_service(service, instance)
         requested_sock_info = self.router.get_socket(requested_fn)
 
+        if rid is not None:
+            requested_sock_info["responses"][rid] = (fn, req_from)
+
+        self.kernel.perms.service_has_permission(req_from[1], req[1], method)
+
         requested_sock_info["send_data"].append([
             self.PROCESS_REQUEST,
             req_from,
@@ -169,9 +174,6 @@ class ServiceHandler(BaseHandler):
             kwargs,
             rid,
         ])
-
-        if rid is not None:
-            requested_sock_info["responses"][rid] = (fn, req_from)
 
         self.router.epollout(requested_fn)
 

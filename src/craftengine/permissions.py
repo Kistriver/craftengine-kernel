@@ -11,6 +11,12 @@ class PermissionsException(ModuleException):
 
 
 class Permissions(KernelModule):
+    def service_has_permission(self, req_service, target_service, target_method):
+        services = self.kernel.service.list()
+        perms = services[req_service].get("permissions", [])
+        reqs = services[target_service].get("methods", {}).get(target_method, [])
+        return self.has_permission(perms, reqs)
+
     def perms_merger(self, perms):
         merged = {}
         for perm in perms:

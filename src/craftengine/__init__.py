@@ -15,6 +15,7 @@ from craftengine import (
     registry,
     service,
     rpc,
+    permissions,
 )
 
 
@@ -29,6 +30,7 @@ class Kernel(KernelModuleSingleton):
     rpc = None
     node = None
     docker = None
+    perms = None
 
     def init(self, *args, **kwargs):
         self.alive = True
@@ -79,6 +81,8 @@ end\
         self.g = registry.Global()
 
         self.service = service.Service()
+
+        self.perms = permissions.Permissions()
 
         self.rpc = rpc.Rpc()
 
